@@ -1,0 +1,91 @@
+import { baseApi } from '@/api/baseApi';
+import type {
+  StrapiItemResponse,
+  StrapiListResponse,
+  Transaction,
+  TransactionType,
+  TransactionWalletSnapshot,
+} from '@/types/api';
+
+interface CreateTransactionBody {
+  type: TransactionType;
+  amount: number;
+  note?: string;
+  categoryId?: string;
+  transactionDate?: string;
+  // Quy ước: thu/chi trong 1 ví -> chỉ điền walletId (ví nguồn).
+  // Chuyển tiền giữa 2 ví -> điền cả walletId (ví nguồn) và toWallet (ví đích,
+  // dạng {id, name} - không phải string như wallet/category khác, do BE lưu
+  // snapshot JSON chứ không phải relation).
+  walletId: string;
+  toWallet?: TransactionWalletSnapshot;
+}
+
+export const transactionApi = baseApi.injectEndpoints({
+  endpoints: (builder) => ({
+    getRecentTransactions: builder.query<Transaction[], { limit?: number } | void>({
+      query: (arg) => {
+        const limit = arg?.limit ?? 5;
+        return (
+          `/transactions?sort=transactionDate:desc&pagination[limit]=${limit}` +
+          `&populate[categoryId][populate][parent][fields][0]=name` +
+          `&populate[categoryId][populate][parent][fields][1]=icon` +
+          `&populate[categoryId][populate][parent][fields][2]=color` +
+          `&populate[walletId][fields][0]=name`
+        );
+      },
+      transformResponse: (response: StrapiListResponse<Transaction>) => response.data,
+      providesTags: [{ type: 'Transaction', id: 'RECENT' }],
+    }),
+
+    createTransaction: builder.mutation<Transaction, CreateTransactionBody>({
+      query: (data) => ({ url: '/transactions', method: 'POST', body: { data } }),
+      transformResponse: (response: StrapiItemResponse<Transaction>) => response.data,
+      // Giao dịch mới có thể làm thay đổi balance của ví -> invalidate cả Wallet
+      // LIST lẫn chi tiết ví liên quan (nguồn + đích khi chuyển khoản) để
+      // trang chi tiết ví (số dư + danh sách giao dịch) refetch đúng lúc.
+      // Cũng invalidate SPENT để progress bar ngân sách cập nhật lại số đã chi.
+      invalidatesTags: (_result, _error, { walletId, toWallet }) => [
+        { type: 'Wallet', id: 'LIST' },
+        { type: 'Wallet', id: walletId },
+        ...(toWallet ? [{ type: 'Wallet' as const, id: toWallet.id }] : []),
+        { type: 'Transaction', id: 'RECENT' },
+        { type: 'Transaction', id: 'SPENT' },
+        { type: 'Report', id: 'LIST' },
+      ],
+    }),
+
+    // Tính tổng đã chi cho 1 ví/danh mục/kỳ - dùng để vẽ progress bar ngân
+    // sách. Đây là tính toán phía client, phỏng theo logic
+    // budget.calculateSpent ở BE (server/src/api/budget/services/budget.ts)
+    // vì hiện chưa có endpoint trả sẵn % đã dùng của ngân sách.
+    getBudgetSpent: builder.query<
+      number,
+      { walletId: string; categoryId?: string | null; month: number; year: number }
+    >({
+      query: ({ walletId, categoryId, month, year }) => {
+        const start = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+        const end = new Date(Date.UTC(year, month, 1)).toISOString();
+        const params = [
+          `filters[walletId][documentId]=${walletId}`,
+          'filters[type]=expense',
+          `filters[transactionDate][$gte]=${encodeURIComponent(start)}`,
+          `filters[transactionDate][$lt]=${encodeURIComponent(end)}`,
+          'fields[0]=amount',
+          'pagination[pageSize]=200',
+        ];
+        if (categoryId) params.push(`filters[categoryId][documentId]=${categoryId}`);
+        return `/transactions?${params.join('&')}`;
+      },
+      transformResponse: (response: StrapiListResponse<{ amount: number }>) =>
+        response.data.reduce((sum, t) => sum + Number(t.amount ?? 0), 0),
+      providesTags: [{ type: 'Transaction', id: 'SPENT' }],
+    }),
+  }),
+});
+
+export const {
+  useGetRecentTransactionsQuery,
+  useCreateTransactionMutation,
+  useGetBudgetSpentQuery,
+} = transactionApi;
