@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -75,9 +76,9 @@ export function NotificationBell() {
       <DropdownMenuTrigger
         render={
           <Button variant="ghost" size="icon" className="relative">
-            <BellIcon />
+            <BellIcon className='size-6' />
             {unreadCount > 0 && (
-              <Badge className="absolute -right-1 -top-1 flex size-4.5 items-center justify-center rounded-full p-0 text-[10px]">
+              <Badge className="absolute -right-1 -top-1 flex size-4.5 text-white font-bold bg-red-500 items-center justify-center rounded-full p-0 pt-1 pl-0.5 text-[10px]">
                 {unreadCount > 9 ? '9+' : unreadCount}
               </Badge>
             )}
@@ -85,15 +86,17 @@ export function NotificationBell() {
         }
       />
       <DropdownMenuContent align="end" className="w-80">
-        <DropdownMenuLabel>Thông báo</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {!notifications || notifications.length === 0 ? (
-          <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-            Không có thông báo nào
-          </p>
-        ) : (
-          notifications.map((n) => <NotificationItem key={n.documentId} notification={n} />)
-        )}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Thông báo</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {!notifications || notifications.length === 0 ? (
+            <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+              Không có thông báo nào
+            </p>
+          ) : (
+            notifications.map((n) => <NotificationItem key={n.documentId} notification={n} />)
+          )}
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           render={

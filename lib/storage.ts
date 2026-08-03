@@ -13,7 +13,16 @@ export const authStorage = {
   getUser<T>(): T | null {
     if (!isBrowser()) return null;
     const raw = window.localStorage.getItem(USER_KEY) ?? window.sessionStorage.getItem(USER_KEY);
-    return raw ? (JSON.parse(raw) as T) : null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      // Corrupted entry (e.g. from an old incompatible app version) - drop it
+      // instead of crashing the auth bootstrap on every page load.
+      window.localStorage.removeItem(USER_KEY);
+      window.sessionStorage.removeItem(USER_KEY);
+      return null;
+    }
   },
   save(token: string, user: unknown, rememberMe = true) {
     if (!isBrowser()) return;

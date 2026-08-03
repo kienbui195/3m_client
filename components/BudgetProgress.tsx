@@ -78,7 +78,10 @@ export function BudgetProgress(props: BudgetProgressProps) {
 
   return (
     <div className="space-y-1.5">
-      <ProgressPrimitive.Root value={Math.min(percent, 100)} className="w-full">
+      {/* balance ví có thể âm (chi vượt số dư) -> percent có thể âm, progress
+          bar vẫn phải kẹp về [0, 100] để hiển thị hợp lệ dù % thật (chưa kẹp)
+          vẫn được dùng nguyên cho badge trạng thái/logic cảnh báo bên trên. */}
+      <ProgressPrimitive.Root value={Math.max(0, Math.min(percent, 100))} className="w-full">
         <ProgressTrack>
           <ProgressIndicator className={tone.bar} />
         </ProgressTrack>
