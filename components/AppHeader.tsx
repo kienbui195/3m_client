@@ -43,7 +43,7 @@ export function AppHeader() {
   const crumbs = useBreadcrumb(pathname);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 sticky top-0 bg-white z-40">
       <SidebarTrigger />
       <Breadcrumb>
         <BreadcrumbList>

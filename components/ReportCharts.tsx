@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query/react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -17,6 +17,7 @@ import { useGetReportByCategoryQuery, useGetReportCompareQuery, useGetReportSumm
 import { useGetWalletsQuery } from '@/api/walletApi';
 import { CategoryPieChart } from '@/components/CategoryPieChart';
 import { IncomeExpenseBarChart } from '@/components/IncomeExpenseBarChart';
+import { NetCashFlowChart } from '@/components/NetCashFlowChart';
 import { SingleSelectToggle } from '@/components/SingleSelectToggle';
 import { formatCurrency } from '@/lib/format';
 import { formatPeriodLabel } from '@/lib/reportDates';
@@ -35,9 +36,9 @@ const COMPARE_OPTIONS: { value: 'previous_month' | 'previous_year'; label: strin
   { value: 'previous_year', label: 'So với cùng kỳ năm trước' },
 ];
 
-const CATEGORY_TYPE_OPTIONS: { value: 'expense' | 'income'; label: string }[] = [
-  { value: 'expense', label: 'Chi tiêu' },
-  { value: 'income', label: 'Thu nhập' },
+const CATEGORY_LEVEL_OPTIONS: { value: 'parent' | 'child'; label: string }[] = [
+  { value: 'child', label: 'Danh mục con' },
+  { value: 'parent', label: 'Danh mục cha' },
 ];
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -133,7 +134,7 @@ export function ReportCharts() {
   const [granularity, setGranularity] = useState<ReportGranularity>('month');
   const [walletId, setWalletId] = useState(ALL_WALLETS);
   const [{ from, to }, setInputs] = useState(defaultInputsFor('month'));
-  const [categoryType, setCategoryType] = useState<'expense' | 'income'>('expense');
+  const [categoryLevel, setCategoryLevel] = useState<'parent' | 'child'>('child');
 
   const now = new Date();
   const [compareMonth, setCompareMonth] = useState(now.getMonth() + 1);
@@ -152,8 +153,12 @@ export function ReportCharts() {
     range ? { granularity, from: range.from, to: range.to, walletId: effectiveWalletId } : skipToken,
   );
 
-  const { data: byCategory, isLoading: isLoadingCategory } = useGetReportByCategoryQuery(
-    range ? { type: categoryType, from: range.from, to: range.to, walletId: effectiveWalletId } : skipToken,
+  const { data: byExpenseCategory, isLoading: isLoadingExpenseCategory } = useGetReportByCategoryQuery(
+    range ? { type: 'expense', from: range.from, to: range.to, walletId: effectiveWalletId } : skipToken,
+  );
+
+  const { data: byIncomeCategory, isLoading: isLoadingIncomeCategory } = useGetReportByCategoryQuery(
+    range ? { type: 'income', from: range.from, to: range.to, walletId: effectiveWalletId } : skipToken,
   );
 
   const { data: compareResult, isLoading: isLoadingCompare } = useGetReportCompareQuery({
@@ -169,10 +174,19 @@ export function ReportCharts() {
     expense: p.expense,
   }));
 
+  const netData = chartData.map((p) => ({ label: p.label, net: p.income - p.expense }));
+
   const avgIncome = summary?.length ? summary.reduce((s, p) => s + p.income, 0) / summary.length : 0;
   const avgExpense = summary?.length ? summary.reduce((s, p) => s + p.expense, 0) / summary.length : 0;
+  const totalIncome = summary?.reduce((s, p) => s + p.income, 0) ?? 0;
+  const totalExpense = summary?.reduce((s, p) => s + p.expense, 0) ?? 0;
+  const netTotal = totalIncome - totalExpense;
+  const savingsRate = totalIncome > 0 ? Math.round((netTotal / totalIncome) * 1000) / 10 : 0;
 
-  const byParentCategory = groupByParentCategory(byCategory, categories);
+  const byExpenseBreakdown =
+    categoryLevel === 'parent' ? groupByParentCategory(byExpenseCategory, categories) : (byExpenseCategory ?? []);
+  const byIncomeBreakdown =
+    categoryLevel === 'parent' ? groupByParentCategory(byIncomeCategory, categories) : (byIncomeCategory ?? []);
 
   const compareMonthInput = `${compareYear}-${pad2(compareMonth)}`;
   const onCompareMonthInputChange = (value: string) => {
@@ -256,7 +270,7 @@ export function ReportCharts() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="py-2">
             <p className="text-sm text-muted-foreground">Thu trung bình / kỳ</p>
@@ -269,11 +283,28 @@ export function ReportCharts() {
             <p className="mt-1 text-xl font-bold text-destructive">{formatCurrency(avgExpense)}</p>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="py-2">
+            <p className="text-sm text-muted-foreground">Tiết kiệm ròng</p>
+            <p className={`mt-1 text-xl font-bold ${netTotal >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
+              {formatCurrency(netTotal)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-2">
+            <p className="text-sm text-muted-foreground">Tỷ lệ tiết kiệm</p>
+            <p className={`mt-1 text-xl font-bold ${savingsRate >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
+              {savingsRate}%
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Thu chi theo thời gian</CardTitle>
+          <CardDescription>Đối chiếu tổng thu nhập và chi tiêu qua các mốc thời gian</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoadingSummary ? (
@@ -288,83 +319,101 @@ export function ReportCharts() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Thống Kê Trực Quan Phân Bổ Chi Tiêu &amp; So Sánh Cùng Kỳ</CardTitle>
+          <CardTitle>Dòng tiền ròng theo thời gian</CardTitle>
+          <CardDescription>Cột xanh là kỳ dư ra, cột đỏ là kỳ chi vượt thu</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-6">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-foreground">Phân bổ theo danh mục</p>
-              <SingleSelectToggle options={CATEGORY_TYPE_OPTIONS} value={categoryType} onChange={setCategoryType} />
-            </div>
+        <CardContent>
+          {isLoadingSummary ? (
+            <Skeleton className="aspect-video w-full" />
+          ) : netData.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Chưa có dữ liệu để hiển thị</p>
+          ) : (
+            <NetCashFlowChart data={netData} />
+          )}
+        </CardContent>
+      </Card>
 
-            {isLoadingCategory ? (
-              <Skeleton className="aspect-video w-full" />
-            ) : byParentCategory.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">Chưa có dữ liệu để hiển thị</p>
-            ) : (
-              <>
-                <CategoryPieChart data={byParentCategory} />
-
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/40 text-left text-xs tracking-wide text-muted-foreground uppercase">
-                        <th className="px-4 py-2">Danh mục cha</th>
-                        <th className="px-4 py-2 text-right">Số tiền đã chi</th>
-                        <th className="px-4 py-2 text-right">Tỷ lệ % chi chiếm</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {byParentCategory.map((row) => (
-                        <tr key={row.categoryId} className="border-b last:border-b-0">
-                          <td className="px-4 py-2 font-medium text-foreground">{row.categoryName}</td>
-                          <td className="px-4 py-2 text-right text-foreground">{formatCurrency(row.amount)}</td>
-                          <td className="px-4 py-2 text-right text-muted-foreground">{row.percent}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Phân bổ theo danh mục</CardTitle>
+            <CardDescription>Bạn hay chi cho danh mục gì, và tiền hay đến từ danh mục gì</CardDescription>
           </div>
-
-          <div className="flex flex-col gap-3 border-t pt-6">
-            <p className="text-sm font-semibold text-foreground">So sánh cùng kỳ</p>
-            <div className="flex flex-wrap items-end gap-4">
-              <div className="space-y-1.5">
-                <Label>Tháng</Label>
-                <input
-                  type="month"
-                  value={compareMonthInput}
-                  onChange={(e) => onCompareMonthInputChange(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm uppercase"
-                />
-              </div>
-              <SingleSelectToggle options={COMPARE_OPTIONS} value={compareWith} onChange={setCompareWith} />
-            </div>
-
-            {isLoadingCompare ? (
+          <SingleSelectToggle options={CATEGORY_LEVEL_OPTIONS} value={categoryLevel} onChange={setCategoryLevel} />
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-semibold text-foreground">Chi tiêu theo danh mục</p>
+            {isLoadingExpenseCategory ? (
               <Skeleton className="aspect-video w-full" />
-            ) : !compareResult ? (
+            ) : byExpenseBreakdown.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">Chưa có dữ liệu để hiển thị</p>
             ) : (
-              <IncomeExpenseBarChart
-                data={[
-                  {
-                    label: compareResult.previous.label,
-                    income: compareResult.previous.income,
-                    expense: compareResult.previous.expense,
-                  },
-                  {
-                    label: compareResult.current.label,
-                    income: compareResult.current.income,
-                    expense: compareResult.current.expense,
-                  },
-                ]}
+              <CategoryPieChart
+                data={byExpenseBreakdown}
+                totalLabel="Tổng chi"
+                insightPrefix="Bạn chi nhiều nhất cho danh mục"
+                amountClassName="text-destructive"
               />
             )}
           </div>
+
+          <div className="flex flex-col gap-3 border-t pt-6 md:border-t-0 md:border-l md:pt-0 md:pl-6">
+            <p className="text-sm font-semibold text-foreground">Thu nhập theo danh mục</p>
+            {isLoadingIncomeCategory ? (
+              <Skeleton className="aspect-video w-full" />
+            ) : byIncomeBreakdown.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">Chưa có dữ liệu để hiển thị</p>
+            ) : (
+              <CategoryPieChart
+                data={byIncomeBreakdown}
+                totalLabel="Tổng thu"
+                insightPrefix="Tiền của bạn đến nhiều nhất từ danh mục"
+                amountClassName="text-emerald-600 dark:text-emerald-400"
+              />
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>So sánh cùng kỳ</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="space-y-1.5">
+              <Label>Tháng</Label>
+              <input
+                type="month"
+                value={compareMonthInput}
+                onChange={(e) => onCompareMonthInputChange(e.target.value)}
+                className="h-9 rounded-md border border-input bg-transparent px-3 text-sm uppercase"
+              />
+            </div>
+            <SingleSelectToggle options={COMPARE_OPTIONS} value={compareWith} onChange={setCompareWith} />
+          </div>
+
+          {isLoadingCompare ? (
+            <Skeleton className="aspect-video w-full" />
+          ) : !compareResult ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Chưa có dữ liệu để hiển thị</p>
+          ) : (
+            <IncomeExpenseBarChart
+              data={[
+                {
+                  label: compareResult.previous.label,
+                  income: compareResult.previous.income,
+                  expense: compareResult.previous.expense,
+                },
+                {
+                  label: compareResult.current.label,
+                  income: compareResult.current.income,
+                  expense: compareResult.current.expense,
+                },
+              ]}
+            />
+          )}
         </CardContent>
       </Card>
     </div>
