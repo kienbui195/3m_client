@@ -38,7 +38,14 @@ export const walletApi = baseApi.injectEndpoints({
     createWallet: builder.mutation<Wallet, WalletFormBody>({
       query: (data) => ({ url: '/wallets', method: 'POST', body: { data } }),
       transformResponse: (response: StrapiItemResponse<Wallet>) => response.data,
-      invalidatesTags: [{ type: 'Wallet', id: 'LIST' }],
+      // Tạo ví đầu tiên khiến BE seed bộ danh mục mặc định (xem wallet
+      // controller) -> phải invalidate Category để FE refetch, nếu không cache
+      // danh mục rỗng cũ (vd: query từ trang báo cáo trước khi có ví) vẫn giữ
+      // nguyên, UI hiện 0 danh mục dù BE đã tạo xong.
+      invalidatesTags: [
+        { type: 'Wallet', id: 'LIST' },
+        { type: 'Category', id: 'LIST' },
+      ],
     }),
 
     updateWallet: builder.mutation<void, { documentId: string; data: WalletFormBody }>({
@@ -47,12 +54,21 @@ export const walletApi = baseApi.injectEndpoints({
         method: 'PUT',
         body: { data },
       }),
-      invalidatesTags: (_result, _error, { documentId }) => [{ type: 'Wallet', id: documentId }],
+      // Sửa ví (đổi tên/số dư) cũng làm thay đổi danh sách ví ở dashboard/wallets
+      // -> invalidate cả LIST để các màn khác refetch, không giữ tên/số dư cũ.
+      invalidatesTags: (_result, _error, { documentId }) => [
+        { type: 'Wallet', id: documentId },
+        { type: 'Wallet', id: 'LIST' },
+      ],
     }),
 
     deleteWallet: builder.mutation<void, string>({
       query: (documentId) => ({ url: `/wallets/delete-wallet/${documentId}`, method: 'DELETE' }),
-      invalidatesTags: [{ type: 'Wallet', id: 'LIST' }],
+      invalidatesTags: (_result, _error, documentId) => [
+        { type: 'Wallet', id: 'LIST' },
+        { type: 'Wallet', id: documentId },
+        { type: 'Transaction', id: 'RECENT' },
+      ],
     }),
   }),
 });

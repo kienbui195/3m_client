@@ -43,12 +43,18 @@ export const categoryApi = baseApi.injectEndpoints({
         body: { data },
       }),
       transformResponse: (response: StrapiItemResponse<Category>) => response.data,
-      invalidatesTags: [{ type: 'Category', id: 'LIST' }],
+      invalidatesTags: (_result, _error, { documentId }) => [
+        { type: 'Category', id: documentId },
+        { type: 'Category', id: 'LIST' },
+      ],
     }),
 
     deleteCategory: builder.mutation<void, string>({
       query: (documentId) => ({ url: `/categories/${documentId}`, method: 'DELETE' }),
-      invalidatesTags: [{ type: 'Category', id: 'LIST' }],
+      invalidatesTags: (result, error, documentId) => [
+        { type: 'Category', id: documentId },
+        { type: 'Category', id: 'LIST' },
+      ],
     }),
   }),
 });

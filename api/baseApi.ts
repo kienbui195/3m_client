@@ -48,5 +48,12 @@ export const baseApi = createApi({
   reducerPath: 'api',
   baseQuery: baseQueryWithReauth,
   tagTypes: ['Wallet', 'User', 'Transaction', 'Category', 'Budget', 'Notification', 'Report'],
+  // Đảm bảo dữ liệu luôn mới cho demo / UX: không giữ cache khi màn hình không
+  // còn dùng, và refetch lại ngay khi màn hình mount lại hoặc cửa sổ được focus.
+  // Kết hợp với invalidation đầy đủ ở các mutation -> sau create/update/delete
+  // luôn lấy dữ liệu mới thay vì tái sử dụng cache cũ.
+  keepUnusedDataFor: 0,
+  refetchOnMountOrArgChange: true,
+  refetchOnFocus: true,
   endpoints: () => ({}),
 });

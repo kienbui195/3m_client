@@ -53,6 +53,9 @@ export const transactionApi = baseApi.injectEndpoints({
         { type: 'Transaction', id: 'SPENT' },
         { type: 'Report', id: 'LIST' },
         { type: 'Budget', id: 'PROGRESS' },
+        // Giao dịch chi có thể khiến BE sinh notification (vượt 80%/100% ngân
+        // sách) -> invalidate để chuông thông báo cập nhật ngay.
+        { type: 'Notification', id: 'LIST' },
       ],
     }),
 
@@ -74,6 +77,7 @@ export const transactionApi = baseApi.injectEndpoints({
         { type: 'Transaction', id: 'SPENT' },
         { type: 'Report', id: 'LIST' },
         { type: 'Budget', id: 'PROGRESS' },
+        { type: 'Notification', id: 'LIST' },
       ],
     }),
 

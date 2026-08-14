@@ -117,6 +117,33 @@ describe('walletApi', () => {
     expect(request.url).toContain('/wallets/delete-wallet/w9');
     expect(request.method).toBe('DELETE');
   });
+
+  it('createWallet invalidates the Category LIST tag so seeded default categories refetch', async () => {
+    // Mô phỏng: user đã từng mở trang báo cáo -> danh mục bị cache rỗng
+    // trước khi tạo ví đầu tiên (BE sẽ seed 22 danh mục mặc định).
+    const store = makeStore();
+    let categoryFetches = 0;
+    fetchMock.mockImplementation((input: { url: string }) => {
+      if (input.url.includes('/categories')) {
+        categoryFetches += 1;
+        return Promise.resolve(jsonResponse(200, emptyList));
+      }
+      return Promise.resolve(
+        jsonResponse(200, { data: { documentId: 'w1', name: 'Ví', type: 'cash', balance: 0, index: 1 } }),
+      );
+    });
+
+    await store.dispatch(categoryApi.endpoints.getCategories.initiate(undefined) as never);
+    expect(categoryFetches).toBe(1);
+
+    await store.dispatch(
+      walletApi.endpoints.createWallet.initiate({ name: 'Ví', type: 'cash', balance: 0 }) as never,
+    );
+
+    // Chờ refetch do invalidation của RTK Query (Category LIST bị invalidate).
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(categoryFetches).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe('budgetApi / categoryApi / notificationApi', () => {
@@ -132,6 +159,42 @@ describe('budgetApi / categoryApi / notificationApi', () => {
     const { calls } = await runQuery(categoryApi.endpoints.getCategories.initiate, undefined);
     expect(calls[0]).toContain('populate[parent]=true');
     expect(calls[0]).toContain('populate[children]=true');
+  });
+
+  it('category create/update/delete invalidate the Category LIST so the list refetches', async () => {
+    // Nếu invalidation không chạy, danh mục tạo/sửa/xóa sẽ không hiện/dừng
+    // hiển thị ngay trên UI do tái sử dụng cache cũ.
+    const store = makeStore();
+    let listFetches = 0; // chỉ đếm GET danh sách, không đếm PUT/DELETE mutation
+    fetchMock.mockImplementation((input: { url: string; method?: string }) => {
+      const method = input.method ?? 'GET';
+      if (input.url.includes('/categories')) {
+        if (method === 'GET') listFetches += 1;
+        return Promise.resolve(jsonResponse(200, emptyList));
+      }
+      return Promise.resolve(
+        jsonResponse(200, { data: { documentId: 'c9', name: 'X', type: 'expense', color: null, icon: null } }),
+      );
+    });
+
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+    await store.dispatch(categoryApi.endpoints.getCategories.initiate(undefined) as never);
+    expect(listFetches).toBe(1);
+
+    await store.dispatch(categoryApi.endpoints.createCategory.initiate({ name: 'Mới' }) as never);
+    await settle();
+    expect(listFetches).toBeGreaterThanOrEqual(2);
+
+    await store.dispatch(
+      categoryApi.endpoints.updateCategory.initiate({ documentId: 'c9', data: { name: 'Sửa' } }) as never,
+    );
+    await settle();
+    expect(listFetches).toBeGreaterThanOrEqual(3);
+
+    await store.dispatch(categoryApi.endpoints.deleteCategory.initiate('c9') as never);
+    await settle();
+    expect(listFetches).toBeGreaterThanOrEqual(4);
   });
 
   it('markNotificationRead PUTs isRead:true', async () => {
