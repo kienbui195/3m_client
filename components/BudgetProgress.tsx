@@ -2,7 +2,7 @@
 
 import { Progress as ProgressPrimitive } from '@base-ui/react/progress';
 import { ProgressIndicator, ProgressTrack } from '@/components/ui/progress';
-import { useGetBudgetSpentQuery } from '@/api/transactionApi';
+import { useGetBudgetProgressQuery } from '@/api/budgetApi';
 import { useGetWalletsQuery } from '@/api/walletApi';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/format';
@@ -34,7 +34,7 @@ export function useBudgetProgress({
   const resolvedMonth = month ?? new Date().getMonth() + 1;
   const resolvedYear = year ?? new Date().getFullYear();
 
-  const { data: spent, isLoading: isSpentLoading } = useGetBudgetSpentQuery(
+  const { data: progress, isLoading: isProgressLoading } = useGetBudgetProgressQuery(
     { walletId, categoryId, month: resolvedMonth, year: resolvedYear },
     { skip: type !== 'expense' },
   );
@@ -48,9 +48,11 @@ export function useBudgetProgress({
     return { current: balance, percent, isLoading: isWalletsLoading };
   }
 
-  const current = spent ?? 0;
-  const percent = amountLimit > 0 ? Math.round((current / amountLimit) * 100) : 0;
-  return { current, percent, isLoading: isSpentLoading || spent === undefined };
+  // Đã chi / % do BE tính (budget.services.calculateSpent) - không duplicate
+  // logic sang client nữa. active:false => không có budget áp dụng -> 0%.
+  const current = progress?.spent ?? 0;
+  const percent = progress?.percent ?? 0;
+  return { current, percent, isLoading: isProgressLoading || progress === undefined };
 }
 
 export function getBudgetToneClasses(type: BudgetType, percent: number) {

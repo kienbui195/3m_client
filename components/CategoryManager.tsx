@@ -1,15 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react';
+import { PencilSimpleIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useGetCategoriesQuery } from '@/api/categoryApi';
+import { useDeleteCategoryMutation } from '@/api/categoryApi';
+import { useLazyCountTransactionsByCategoryQuery } from '@/api/transactionApi';
 import { CategoryFormDialog } from '@/components/CategoryFormDialog';
 import { CategoryIconView } from '@/components/CategoryIconView';
 import { SingleSelectToggle } from '@/components/SingleSelectToggle';
 import { getCategoryColorClass } from '@/lib/categoryColors';
+import { getErrorMessage } from '@/lib/errors';
 import { cn } from '@/lib/utils';
 import type { Category, CategoryType } from '@/types/api';
 
@@ -27,12 +41,16 @@ function ParentCategoryCard({
   onAddChild,
   onEdit,
   onEditChild,
+  onDeleteChild,
+  onDelete,
 }: {
   category: Category;
   childCategories: Category[];
   onAddChild: () => void;
   onEdit: () => void;
   onEditChild: (child: Category) => void;
+  onDeleteChild: (child: Category) => void;
+  onDelete: (target: Category) => void;
 }) {
   const isIncome = category.type === 'income';
 
@@ -75,21 +93,47 @@ function ParentCategoryCard({
             <Button variant="ghost" size="icon-sm" onClick={onEdit} title="Sửa danh mục">
               <PencilSimpleIcon />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => onDelete(category)}
+              disabled={childCategories.length > 0}
+              title={
+                childCategories.length > 0
+                  ? 'Xóa các danh mục con trước'
+                  : 'Xóa danh mục'
+              }
+            >
+              <TrashIcon className="text-destructive" />
+            </Button>
           </div>
         </div>
 
         {childCategories.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {childCategories.map((child) => (
-              <button
+              <div
                 key={child.documentId}
-                type="button"
-                onClick={() => onEditChild(child)}
-                className="flex items-center gap-1.5 rounded-full border border-input bg-muted/40 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                className="flex items-center gap-1 rounded-full border border-input bg-muted/40 py-1.5 pr-1 pl-3"
               >
-                <CategoryIconView icon={child.icon} className="size-3.5" />
-                {child.name}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onEditChild(child)}
+                  className="flex items-center gap-1.5 text-xs font-medium text-foreground transition-colors hover:text-primary"
+                  title="Sửa danh mục con"
+                >
+                  <CategoryIconView icon={child.icon} className="size-3.5" />
+                  {child.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteChild(child)}
+                  className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  title="Xóa danh mục con"
+                >
+                  <TrashIcon className="size-3" />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -100,11 +144,17 @@ function ParentCategoryCard({
 
 export function CategoryManager() {
   const { data: categories, isLoading } = useGetCategoriesQuery();
+  const [deleteCategory, { isLoading: isDeleting }] = useDeleteCategoryMutation();
+  const [countTransactions] = useLazyCountTransactionsByCategoryQuery();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | undefined>(undefined);
   const [presetParent, setPresetParent] = useState<Category | undefined>(undefined);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+
+  // Danh mục chờ xác nhận xóa + số giao dịch đang dùng nó (null = đang đếm).
+  const [pendingDelete, setPendingDelete] = useState<Category | null>(null);
+  const [deleteUsageCount, setDeleteUsageCount] = useState<number | null>(null);
 
   const topLevel = (categories ?? []).filter((c) => !c.parent);
   const visibleTopLevel = topLevel.filter((c) => typeFilter === 'all' || c.type === typeFilter);
@@ -127,6 +177,30 @@ export function CategoryManager() {
     setEditingCategory(target);
     setPresetParent(undefined);
     setFormOpen(true);
+  };
+
+  const requestDelete = async (target: Category) => {
+    setPendingDelete(target);
+    setDeleteUsageCount(null);
+    try {
+      const total = await countTransactions(target.documentId).unwrap();
+      setDeleteUsageCount(total);
+    } catch {
+      // Không đếm được thì vẫn cho xóa, chỉ không hiện số chính xác.
+      setDeleteUsageCount(0);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    try {
+      await deleteCategory(pendingDelete.documentId).unwrap();
+      toast.success('Đã xóa danh mục.');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Xóa danh mục thất bại.'));
+    } finally {
+      setPendingDelete(null);
+    }
   };
 
   return (
@@ -172,6 +246,8 @@ export function CategoryManager() {
               onAddChild={() => openAddChild(top)}
               onEdit={() => openEdit(top)}
               onEditChild={openEdit}
+              onDeleteChild={requestDelete}
+              onDelete={requestDelete}
             />
           ))}
         </div>
@@ -184,6 +260,33 @@ export function CategoryManager() {
         presetParent={presetParent}
         topLevelCategories={topLevel}
       />
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{`Xóa danh mục "${pendingDelete?.name}"?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteUsageCount === null ? (
+                'Đang kiểm tra các giao dịch sử dụng danh mục này...'
+              ) : deleteUsageCount > 0 ? (
+                <>
+                  Danh mục này đang được <span className="font-semibold text-destructive">{deleteUsageCount}</span>{' '}
+                  giao dịch sử dụng. Sau khi xóa, các giao dịch đó sẽ hiển thị là &quot;Chưa phân loại&quot; và bạn
+                  có thể gán lại danh mục khác bất kỳ lúc nào.
+                </>
+              ) : (
+                'Danh mục này không được giao dịch nào sử dụng. Hành động này không thể hoàn tác.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={isDeleting}>
+              {isDeleting ? 'Đang xóa...' : 'Xóa'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

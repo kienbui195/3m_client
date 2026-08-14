@@ -1,4 +1,4 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorCode } from '@/lib/errors';
 
 describe('getErrorMessage', () => {
   const FALLBACK = 'Đã có lỗi xảy ra, vui lòng thử lại.';
@@ -40,5 +40,22 @@ describe('getErrorMessage', () => {
   it('prefers the nested message over a custom fallback when both are available', () => {
     const err = { data: { error: { message: 'Server message' } } };
     expect(getErrorMessage(err, 'Custom fallback')).toBe('Server message');
+  });
+});
+
+describe('getErrorCode', () => {
+  it('returns null when there is no code', () => {
+    expect(getErrorCode(null)).toBeNull();
+    expect(getErrorCode({ data: { error: { message: 'boom' } } })).toBeNull();
+  });
+
+  it('extracts the nested details.code (e.g. INVALID_TOKEN)', () => {
+    const err = { data: { error: { details: { code: 'INVALID_TOKEN' } } } };
+    expect(getErrorCode(err)).toBe('INVALID_TOKEN');
+  });
+
+  it('returns null when the shape does not match', () => {
+    expect(getErrorCode('plain string')).toBeNull();
+    expect(getErrorCode({})).toBeNull();
   });
 });

@@ -22,12 +22,12 @@ import {
 } from '@/components/ui/select';
 import { EmptySelectItem } from '@/components/EmptySelectItem';
 import { useGetCategoriesQuery } from '@/api/categoryApi';
-import { useCreateTransactionMutation } from '@/api/transactionApi';
+import { useCreateTransactionMutation, useUpdateTransactionMutation } from '@/api/transactionApi';
 import { useGetWalletsQuery } from '@/api/walletApi';
 import { getErrorMessage } from '@/lib/errors';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Category, TransactionType, Wallet } from '@/types/api';
+import type { Category, Transaction, TransactionType, Wallet } from '@/types/api';
 
 const TRANSACTION_TYPE_META: Record<
   TransactionType,
@@ -62,6 +62,9 @@ interface TransactionFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultWalletId?: string;
+  // Truyền vào để mở ở chế độ SỬA (re-assign danh mục, sửa số tiền...) -
+  // chưa truyền = tạo mới.
+  transaction?: Transaction;
   onSuccess?: () => void;
 }
 
@@ -69,6 +72,7 @@ export function TransactionFormDialog({
   open,
   onOpenChange,
   defaultWalletId,
+  transaction,
   onSuccess,
 }: TransactionFormDialogProps) {
   const { data: wallets } = useGetWalletsQuery();
@@ -81,10 +85,11 @@ export function TransactionFormDialog({
             state tự khởi tạo lại từ props, không cần effect để reset. */}
         {open && (
           <TransactionFormBody
-            key={defaultWalletId ?? 'none'}
+            key={transaction?.documentId ?? defaultWalletId ?? 'none'}
             wallets={wallets ?? []}
             categories={categories ?? []}
             defaultWalletId={defaultWalletId}
+            transaction={transaction}
             onOpenChange={onOpenChange}
             onSuccess={onSuccess}
           />
@@ -98,25 +103,38 @@ function TransactionFormBody({
   wallets,
   categories,
   defaultWalletId,
+  transaction,
   onOpenChange,
   onSuccess,
 }: {
   wallets: Wallet[];
   categories: Category[];
   defaultWalletId?: string;
+  transaction?: Transaction;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
 }) {
-  const [createTransaction, { isLoading: isSubmitting }] = useCreateTransactionMutation();
+  const [createTransaction, { isLoading: isCreating }] = useCreateTransactionMutation();
+  const [updateTransaction, { isLoading: isUpdating }] = useUpdateTransactionMutation();
+  const isEdit = Boolean(transaction);
 
-  const [type, setType] = useState<TransactionType>('expense');
-  const [amount, setAmount] = useState('');
-  const [walletId, setWalletId] = useState(defaultWalletId ?? wallets[0]?.documentId ?? '');
-  const [toWalletId, setToWalletId] = useState('');
-  const [parentCategoryId, setParentCategoryId] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [transactionDate, setTransactionDate] = useState(todayIsoDate);
-  const [note, setNote] = useState('');
+  // Khi sửa: tìm danh mục cha từ cây danh mục (chi tiết ví không populate
+  // parent trên categoryId, nhưng query categories thì có).
+  const existingCategory = transaction?.categoryId
+    ? categories.find((c) => c.documentId === transaction.categoryId?.documentId)
+    : undefined;
+  const existingParentId = existingCategory?.parent?.documentId ?? '';
+
+  const [type, setType] = useState<TransactionType>(transaction?.type ?? 'expense');
+  const [amount, setAmount] = useState(transaction ? String(transaction.amount) : '');
+  const [walletId, setWalletId] = useState(transaction?.walletId?.documentId ?? defaultWalletId ?? wallets[0]?.documentId ?? '');
+  const [toWalletId, setToWalletId] = useState(transaction?.toWallet?.id ?? '');
+  const [parentCategoryId, setParentCategoryId] = useState(existingParentId);
+  const [categoryId, setCategoryId] = useState(transaction?.categoryId?.documentId ?? '');
+  const [transactionDate, setTransactionDate] = useState(
+    transaction?.transactionDate ? new Date(transaction.transactionDate).toISOString().slice(0, 10) : todayIsoDate,
+  );
+  const [note, setNote] = useState(transaction?.note ?? '');
   const [error, setError] = useState<string | null>(null);
 
   const toWalletOptions = wallets.filter((w) => w.documentId !== walletId);
@@ -169,19 +187,25 @@ function TransactionFormBody({
     }
 
     const toWallet = wallets.find((w) => w.documentId === toWalletId);
+    const body = {
+      type,
+      amount: parsedAmount,
+      note: note.trim() || undefined,
+      categoryId: type === 'transfer' ? undefined : categoryId,
+      transactionDate: new Date(transactionDate).toISOString(),
+      walletId,
+      toWallet:
+        type === 'transfer' && toWallet ? { id: toWallet.documentId, name: toWallet.name } : undefined,
+    };
 
     try {
-      await createTransaction({
-        type,
-        amount: parsedAmount,
-        note: note.trim() || undefined,
-        categoryId: type === 'transfer' ? undefined : categoryId,
-        transactionDate: new Date(transactionDate).toISOString(),
-        walletId,
-        toWallet:
-          type === 'transfer' && toWallet ? { id: toWallet.documentId, name: toWallet.name } : undefined,
-      }).unwrap();
-      toast.success('Đã thêm giao dịch.');
+      if (isEdit && transaction) {
+        await updateTransaction({ documentId: transaction.documentId, data: body }).unwrap();
+        toast.success('Đã cập nhật giao dịch.');
+      } else {
+        await createTransaction(body).unwrap();
+        toast.success('Đã thêm giao dịch.');
+      }
       onOpenChange(false);
       onSuccess?.();
     } catch (err) {
@@ -194,8 +218,12 @@ function TransactionFormBody({
   return (
     <form onSubmit={onSubmit}>
       <DialogHeader>
-        <DialogTitle>Thêm giao dịch</DialogTitle>
-        <DialogDescription>Ghi lại một khoản thu, chi hoặc chuyển khoản.</DialogDescription>
+        <DialogTitle>{isEdit ? 'Sửa giao dịch' : 'Thêm giao dịch'}</DialogTitle>
+        <DialogDescription>
+          {isEdit
+            ? 'Cập nhật thông tin giao dịch. Số dư các ví liên quan sẽ được tính lại tự động.'
+            : 'Ghi lại một khoản thu, chi hoặc chuyển khoản.'}
+        </DialogDescription>
       </DialogHeader>
 
       <div className="grid gap-4 py-4">
@@ -373,10 +401,10 @@ function TransactionFormBody({
       <DialogFooter>
         <Button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isCreating || isUpdating}
           className={TRANSACTION_TYPE_META[type].submitClass}
         >
-          {isSubmitting ? 'Đang lưu...' : 'Xác Nhận Tạo Giao Dịch'}
+          {isCreating || isUpdating ? 'Đang lưu...' : isEdit ? 'Xác Nhận Cập Nhật' : 'Xác Nhận Tạo Giao Dịch'}
         </Button>
       </DialogFooter>
     </form>

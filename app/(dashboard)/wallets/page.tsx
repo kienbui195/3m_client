@@ -98,6 +98,8 @@ type TimeFilter = 'all' | 'this' | 'last';
 
 const ALL_TYPE = 'all';
 const ALL_CATEGORY = '__all__';
+const UNCATEGORIZED = '__uncategorized__';
+const TX_PAGE_SIZE = 20;
 
 export default function WalletsPage() {
   return (
@@ -218,6 +220,7 @@ function WalletsPageContent() {
 
       {activeWalletId ? (
         <WalletDetailPanel
+          key={activeWalletId}
           walletId={activeWalletId}
           identityColor={getWalletIdentityColor(sortedWallets.findIndex((w) => w.documentId === activeWalletId))}
         />
@@ -242,6 +245,8 @@ function WalletDetailPanel({
   const [editOpen, setEditOpen] = useState(false);
   const [addTxOpen, setAddTxOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [editTx, setEditTx] = useState<Transaction | null>(null);
+  const [visibleCount, setVisibleCount] = useState(TX_PAGE_SIZE);
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(ALL_TYPE);
@@ -293,7 +298,12 @@ function WalletDetailPanel({
   const searchQuery = search.trim().toLowerCase();
   const filteredTransactions = wallet.transactions.filter((t) => {
     if (typeFilter !== ALL_TYPE && t.type !== typeFilter) return false;
-    if (categoryFilter !== ALL_CATEGORY && t.categoryId?.documentId !== categoryFilter) return false;
+    if (categoryFilter === UNCATEGORIZED) {
+      // "Chưa phân loại" = giao dịch thu/chi không gắn danh mục (transfer không tính).
+      if (t.type === 'transfer' || t.categoryId) return false;
+    } else if (categoryFilter !== ALL_CATEGORY && t.categoryId?.documentId !== categoryFilter) {
+      return false;
+    }
     if (!isInTimeRange(t.transactionDate)) return false;
     if (searchQuery) {
       const noteMatch = t.note?.toLowerCase().includes(searchQuery) ?? false;
@@ -302,6 +312,8 @@ function WalletDetailPanel({
     }
     return true;
   });
+
+  const visibleTransactions = filteredTransactions.slice(0, visibleCount);
 
   return (
     <div className="flex flex-col gap-4">
@@ -399,6 +411,7 @@ function WalletDetailPanel({
               onValueChange={(v) => setCategoryFilter(v ?? ALL_CATEGORY)}
               items={[
                 { value: ALL_CATEGORY, label: 'Tất cả danh mục' },
+                { value: UNCATEGORIZED, label: 'Chưa phân loại' },
                 ...filterableCategories.map((c) => ({ value: c.documentId, label: c.name })),
               ]}
             >
@@ -407,6 +420,7 @@ function WalletDetailPanel({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_CATEGORY}>Tất cả danh mục</SelectItem>
+                <SelectItem value={UNCATEGORIZED}>Chưa phân loại</SelectItem>
                 {filterableCategories.map((c) => (
                   <SelectItem key={c.documentId} value={c.documentId}>
                     {c.name}
@@ -444,45 +458,67 @@ function WalletDetailPanel({
             </div>
           ) : (
             <ul className="-mx-(--card-spacing)">
-              {filteredTransactions.map((item) => {
+              {visibleTransactions.map((item) => {
                 const sign = item.type === 'expense' ? '-' : item.type === 'income' ? '+' : '';
                 const transferLabel = item.toWallet
                   ? `Chuyển đến ${item.toWallet.name ?? 'ví khác'}`
                   : item.fromWallet
                     ? `Nhận từ ${item.fromWallet.name ?? 'ví khác'}`
                     : TRANSACTION_TYPE_LABEL[item.type];
+                const isOrphan = item.type !== 'transfer' && !item.categoryId;
                 const fullCategory = item.categoryId
                   ? categoryByDocumentId.get(item.categoryId.documentId)
                   : undefined;
                 const colorClass = getCategoryColorClass(fullCategory?.parent?.color ?? fullCategory?.color);
+                // Giao dịch đối ứng (bản mirror) không cho sửa trực tiếp - chỉ
+                // sửa từ giao dịch gốc của ví chuyển đi.
+                const isTransferMirror = item.type === 'transfer' && item.fromWallet && !item.toWallet;
 
                 return (
                   <li
                     key={item.documentId}
                     className="flex items-center justify-between border-b px-(--card-spacing) py-3 last:border-b-0"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
                       <div className={cn('flex size-9 items-center justify-center rounded-full', colorClass)}>
                         <CategoryIconView icon={fullCategory?.icon} className="size-4" />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-sm font-medium text-foreground">
                           {item.type === 'transfer'
                             ? transferLabel
-                            : (item.categoryId?.name ?? TRANSACTION_TYPE_LABEL[item.type])}
+                            : (item.categoryId?.name ?? 'Chưa phân loại')}
                         </p>
-                        {item.note ? <p className="text-xs text-muted-foreground">{item.note}</p> : null}
+                        <p className={cn('text-xs', isOrphan ? 'text-destructive' : 'text-muted-foreground')}>
+                          {isOrphan
+                            ? 'Chưa phân loại - nhấn nút sửa để gán danh mục'
+                            : item.note
+                              ? item.note
+                              : TRANSACTION_TYPE_LABEL[item.type]}
+                        </p>
                       </div>
                     </div>
-                    <span className={`text-sm font-semibold ${TRANSACTION_COLOR[item.type]}`}>
-                      {sign}
-                      {formatCurrency(item.amount)}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className={`text-sm font-semibold ${TRANSACTION_COLOR[item.type]}`}>
+                        {sign}
+                        {formatCurrency(item.amount)}
+                      </span>
+                      {!isTransferMirror && (
+                        <Button variant="ghost" size="icon-sm" onClick={() => setEditTx(item)} title="Sửa giao dịch">
+                          <PencilSimpleIcon className="size-4" />
+                        </Button>
+                      )}
+                    </div>
                   </li>
                 );
               })}
             </ul>
           )}
+          {filteredTransactions.length > visibleCount ? (
+            <Button variant="outline" className="w-full" onClick={() => setVisibleCount((n) => n + TX_PAGE_SIZE)}>
+              Xem thêm ({filteredTransactions.length - visibleCount} giao dịch)
+            </Button>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -492,13 +528,20 @@ function WalletDetailPanel({
         onOpenChange={setAddTxOpen}
         defaultWalletId={wallet.documentId}
       />
+      <TransactionFormDialog
+        open={!!editTx}
+        onOpenChange={(o) => !o && setEditTx(null)}
+        transaction={editTx ?? undefined}
+        defaultWalletId={wallet.documentId}
+      />
 
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{`Xóa ví "${wallet.name}"?`}</AlertDialogTitle>
             <AlertDialogDescription>
-              Hành động này không thể hoàn tác. Ví sẽ bị ẩn khỏi danh sách của bạn.
+              Ví này đang có {wallet.transactions.length} giao dịch. Hành động này không thể hoàn tác. Ví sẽ bị ẩn
+              khỏi danh sách; các giao dịch cũ vẫn được giữ lại trong hệ thống.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

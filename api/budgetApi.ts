@@ -12,6 +12,14 @@ interface BudgetFormBody {
   periodYear?: number | null;
 }
 
+export interface BudgetProgressResult {
+  active: boolean;
+  spent: number;
+  limit: number;
+  percent: number;
+  budgetDocumentId?: string;
+}
+
 export const budgetApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getBudgets: builder.query<Budget[], void>({
@@ -30,7 +38,7 @@ export const budgetApi = baseApi.injectEndpoints({
     createBudget: builder.mutation<Budget, BudgetFormBody>({
       query: (data) => ({ url: '/budgets', method: 'POST', body: { data } }),
       transformResponse: (response: StrapiItemResponse<Budget>) => response.data,
-      invalidatesTags: [{ type: 'Budget', id: 'LIST' }],
+      invalidatesTags: [{ type: 'Budget', id: 'LIST' }, { type: 'Budget', id: 'PROGRESS' }],
     }),
 
     updateBudget: builder.mutation<Budget, { documentId: string; data: BudgetFormBody }>({
@@ -40,12 +48,25 @@ export const budgetApi = baseApi.injectEndpoints({
         body: { data },
       }),
       transformResponse: (response: StrapiItemResponse<Budget>) => response.data,
-      invalidatesTags: [{ type: 'Budget', id: 'LIST' }],
+      invalidatesTags: [{ type: 'Budget', id: 'LIST' }, { type: 'Budget', id: 'PROGRESS' }],
     }),
 
     deleteBudget: builder.mutation<void, string>({
       query: (documentId) => ({ url: `/budgets/${documentId}`, method: 'DELETE' }),
-      invalidatesTags: [{ type: 'Budget', id: 'LIST' }],
+      invalidatesTags: [{ type: 'Budget', id: 'LIST' }, { type: 'Budget', id: 'PROGRESS' }],
+    }),
+
+    // Tiến độ budget "expense" do BE tính sẵn (spent/limit/percent) - tránh
+    // duplicate logic calculateSpent sang client. Income budget (quỹ tích lũy)
+    // tính theo số dư ví nên không dùng endpoint này.
+    getBudgetProgress: builder.query<BudgetProgressResult, { walletId: string; categoryId?: string | null; month: number; year: number }>({
+      query: ({ walletId, categoryId, month, year }) => {
+        const params = [`month=${month}`, `year=${year}`];
+        if (categoryId) params.push(`categoryId=${categoryId}`);
+        return `/budgets/progress/${walletId}?${params.join('&')}`;
+      },
+      transformResponse: (response: { data: BudgetProgressResult }) => response.data,
+      providesTags: [{ type: 'Budget', id: 'PROGRESS' }],
     }),
   }),
 });
@@ -55,4 +76,5 @@ export const {
   useCreateBudgetMutation,
   useUpdateBudgetMutation,
   useDeleteBudgetMutation,
+  useGetBudgetProgressQuery,
 } = budgetApi;

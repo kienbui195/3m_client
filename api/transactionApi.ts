@@ -52,7 +52,37 @@ export const transactionApi = baseApi.injectEndpoints({
         { type: 'Transaction', id: 'RECENT' },
         { type: 'Transaction', id: 'SPENT' },
         { type: 'Report', id: 'LIST' },
+        { type: 'Budget', id: 'PROGRESS' },
       ],
+    }),
+
+    updateTransaction: builder.mutation<Transaction, { documentId: string; data: CreateTransactionBody }>({
+      query: ({ documentId, data }) => ({
+        url: `/transactions/${documentId}`,
+        method: 'PUT',
+        body: { data },
+      }),
+      transformResponse: (response: StrapiItemResponse<Transaction>) => response.data,
+      // Sửa giao dịch có thể làm thay đổi balance của ví cũ/ví mới và cả ví
+      // đối ứng (khi chuyển khoản) -> invalidate rộng như create, cộng thêm
+      // tiến độ ngân sách.
+      invalidatesTags: (_result, _error, { data }) => [
+        { type: 'Wallet', id: 'LIST' },
+        { type: 'Wallet', id: data.walletId },
+        ...(data.toWallet ? [{ type: 'Wallet' as const, id: data.toWallet.id }] : []),
+        { type: 'Transaction', id: 'RECENT' },
+        { type: 'Transaction', id: 'SPENT' },
+        { type: 'Report', id: 'LIST' },
+        { type: 'Budget', id: 'PROGRESS' },
+      ],
+    }),
+
+    // Đếm số giao dịch đang dùng 1 danh mục - dùng để cảnh báo trước khi xóa
+    // danh mục (các giao dịch đó sẽ thành "Chưa phân loại").
+    countTransactionsByCategory: builder.query<number, string>({
+      query: (categoryId) =>
+        `/transactions?filters[categoryId][documentId]=${categoryId}&fields[0]=id&pagination[pageSize]=1`,
+      transformResponse: (response: StrapiListResponse<unknown>) => response.meta.pagination.total,
     }),
 
     // Tính tổng đã chi cho 1 ví/danh mục/kỳ - dùng để vẽ progress bar ngân
@@ -87,5 +117,7 @@ export const transactionApi = baseApi.injectEndpoints({
 export const {
   useGetRecentTransactionsQuery,
   useCreateTransactionMutation,
+  useUpdateTransactionMutation,
   useGetBudgetSpentQuery,
+  useLazyCountTransactionsByCategoryQuery,
 } = transactionApi;

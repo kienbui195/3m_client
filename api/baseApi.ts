@@ -1,5 +1,6 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query/react';
+import { toast } from 'sonner';
 import { loggedOut } from '@/store/authSlice';
 import { authStorage } from '@/lib/storage';
 import type { RootState } from '@/store';
@@ -18,6 +19,9 @@ const rawBaseQuery = fetchBaseQuery({
 // Không có refresh-token flow khả dụng ở BE hiện tại (xem ghi chú trong
 // customLogin), nên khi access token hết hạn (401) chỉ có thể đăng xuất
 // và yêu cầu đăng nhập lại, không thể tự làm mới token ngầm.
+// Tránh spam toast khi nhiều request cùng lúc đều fail 401.
+let lastSessionExpiredAt = 0;
+
 const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
   args,
   api,
@@ -28,6 +32,13 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   if (result.error?.status === 401) {
     authStorage.clear();
     api.dispatch(loggedOut());
+    // AuthGuard sẽ redirect về /auth/login khi token thành null; toast này
+    // (Toaster mount ở root layout) sống xuyên qua redirect.
+    const now = Date.now();
+    if (now - lastSessionExpiredAt > 1000) {
+      lastSessionExpiredAt = now;
+      toast.error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.');
+    }
   }
 
   return result;
