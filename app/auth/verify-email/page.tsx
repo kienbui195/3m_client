@@ -93,7 +93,7 @@ function VerifyEmailCard() {
         setStatus(OUTCOME_BY_CODE[getErrorCode(err) ?? ''] ?? 'invalid');
         setMessage(getErrorMessage(err, 'Xác thực email thất bại.'));
       });
-  }, [token, verifyEmail]);
+  }, [token, email, verifyEmail]);
 
   // Đếm ngược dùng chung cho cả 2 nhánh: chuyển hướng về login (success /
   // redirect) và mở khóa nút gửi lại mail (invalid).

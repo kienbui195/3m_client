@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useGetCategoriesQuery } from '@/api/categoryApi';
+import { useDeleteTransactionMutation } from '@/api/transactionApi';
 import { useDeleteWalletMutation, useGetWalletQuery, useGetWalletsQuery } from '@/api/walletApi';
 import { CategoryIconView } from '@/components/CategoryIconView';
 import { TransactionFormDialog } from '@/components/TransactionFormDialog';
@@ -241,11 +242,13 @@ function WalletDetailPanel({
   const { data: wallet, isLoading } = useGetWalletQuery(walletId);
   const { data: categories } = useGetCategoriesQuery();
   const [deleteWallet, { isLoading: isDeleting }] = useDeleteWalletMutation();
+  const [deleteTransaction, { isLoading: isDeletingTx }] = useDeleteTransactionMutation();
 
   const [editOpen, setEditOpen] = useState(false);
   const [addTxOpen, setAddTxOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [editTx, setEditTx] = useState<Transaction | null>(null);
+  const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
   const [visibleCount, setVisibleCount] = useState(TX_PAGE_SIZE);
 
   const [search, setSearch] = useState('');
@@ -261,6 +264,21 @@ function WalletDetailPanel({
       setConfirmDeleteOpen(false);
     } catch (err) {
       toast.error(getErrorMessage(err, 'Xóa ví thất bại, vui lòng thử lại.'));
+    }
+  };
+
+  const onDeleteTx = async () => {
+    if (!deletingTx) return;
+    try {
+      await deleteTransaction({
+        documentId: deletingTx.documentId,
+        walletId: deletingTx.walletId?.documentId,
+        toWalletId: deletingTx.toWallet?.id,
+      }).unwrap();
+      toast.success('Đã xóa giao dịch.');
+      setDeletingTx(null);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Xóa giao dịch thất bại, vui lòng thử lại.'));
     }
   };
 
@@ -295,8 +313,18 @@ function WalletDetailPanel({
     return d.getFullYear() === lastMonth.getFullYear() && d.getMonth() === lastMonth.getMonth();
   };
 
+  // Lịch sử giao dịch: mới nhất lên đầu (theo ngày giao dịch), giao dịch cùng
+  // ngày thì mới tạo trước (id giảm dần) - BE chỉ sort theo transactionDate
+  // nên thứ tự các giao dịch trùng ngày không đảm bảo.
+  const sortedTransactions = [...wallet.transactions].sort((a, b) => {
+    const dateA = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+    const dateB = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+    if (dateB !== dateA) return dateB - dateA;
+    return b.id - a.id;
+  });
+
   const searchQuery = search.trim().toLowerCase();
-  const filteredTransactions = wallet.transactions.filter((t) => {
+  const filteredTransactions = sortedTransactions.filter((t) => {
     if (typeFilter !== ALL_TYPE && t.type !== typeFilter) return false;
     if (categoryFilter === UNCATEGORIZED) {
       // "Chưa phân loại" = giao dịch thu/chi không gắn danh mục (transfer không tính).
@@ -504,9 +532,24 @@ function WalletDetailPanel({
                         {formatCurrency(item.amount)}
                       </span>
                       {!isTransferMirror && (
-                        <Button variant="ghost" size="icon-sm" onClick={() => setEditTx(item)} title="Sửa giao dịch">
-                          <PencilSimpleIcon className="size-4" />
-                        </Button>
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setEditTx(item)}
+                            title="Sửa giao dịch"
+                          >
+                            <PencilSimpleIcon className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setDeletingTx(item)}
+                            title="Xóa giao dịch"
+                          >
+                            <TrashIcon className="size-4 text-destructive" />
+                          </Button>
+                        </>
                       )}
                     </div>
                   </li>
@@ -547,6 +590,25 @@ function WalletDetailPanel({
           <AlertDialogFooter>
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction onClick={onDelete}>Xóa</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deletingTx} onOpenChange={(open) => !open && setDeletingTx(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xóa giao dịch này?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingTx?.type === 'transfer'
+                ? 'Cả giao dịch chuyển tiền gốc lẫn giao dịch đối ứng ở ví kia sẽ bị xóa. Số dư các ví liên quan được tính lại tự động.'
+                : 'Số dư của ví sẽ được tính lại tự động. Hành động này không thể hoàn tác.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteTx} disabled={isDeletingTx}>
+              Xóa
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

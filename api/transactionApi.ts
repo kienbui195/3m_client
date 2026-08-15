@@ -81,6 +81,28 @@ export const transactionApi = baseApi.injectEndpoints({
       ],
     }),
 
+    deleteTransaction: builder.mutation<
+      void,
+      { documentId: string; walletId?: string; toWalletId?: string }
+    >({
+      query: ({ documentId }) => ({
+        url: `/transactions/${documentId}`,
+        method: 'DELETE',
+      }),
+      // Xóa giao dịch làm revert balance ví nguồn (+ ví đối ứng khi transfer) và
+      // thay đổi số đã chi/tiến độ ngân sách - invalidate rộng như update.
+      invalidatesTags: (_result, _error, { walletId, toWalletId }) => [
+        { type: 'Wallet', id: 'LIST' },
+        ...(walletId ? [{ type: 'Wallet' as const, id: walletId }] : []),
+        ...(toWalletId ? [{ type: 'Wallet' as const, id: toWalletId }] : []),
+        { type: 'Transaction', id: 'RECENT' },
+        { type: 'Transaction', id: 'SPENT' },
+        { type: 'Report', id: 'LIST' },
+        { type: 'Budget', id: 'PROGRESS' },
+        { type: 'Notification', id: 'LIST' },
+      ],
+    }),
+
     // Đếm số giao dịch đang dùng 1 danh mục - dùng để cảnh báo trước khi xóa
     // danh mục (các giao dịch đó sẽ thành "Chưa phân loại").
     countTransactionsByCategory: builder.query<number, string>({
@@ -122,6 +144,7 @@ export const {
   useGetRecentTransactionsQuery,
   useCreateTransactionMutation,
   useUpdateTransactionMutation,
+  useDeleteTransactionMutation,
   useGetBudgetSpentQuery,
   useLazyCountTransactionsByCategoryQuery,
 } = transactionApi;

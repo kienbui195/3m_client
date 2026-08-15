@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { ArrowRightIcon, BellIcon, TrophyIcon, WarningCircleIcon } from '@phosphor-icons/react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,8 +16,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useGetNotificationsQuery, useMarkNotificationReadMutation } from '@/api/notificationApi';
+import { playNotificationSound } from '@/lib/notificationSound';
 import { formatCurrency } from '@/lib/format';
 import type { AppNotification } from '@/types/api';
+
+// Chu kỳ tự động kiểm tra thông báo mới (ms) để hệ thống cảnh báo ngân sách
+// hiện lên mà người dùng không cần chuyển trang/focus lại cửa sổ.
+const NOTIFICATION_POLL_INTERVAL = 20000;
 
 export function formatTriggeredAt(value: string | null) {
   if (!value) return '';
@@ -24,8 +31,7 @@ export function formatTriggeredAt(value: string | null) {
   );
 }
 
-export function NotificationItem({ notification }: { notification: AppNotification }) {
-  const [markRead] = useMarkNotificationReadMutation();
+export function buildNotificationMessage(notification: AppNotification) {
   const budget = notification.budgetId;
   const walletName = budget?.walletId?.name ?? 'ví';
   const isOver = notification.thresholdPercent >= 100;
@@ -35,10 +41,17 @@ export function NotificationItem({ notification }: { notification: AppNotificati
   const isGoal = budget?.type === 'income';
   const scope = budget?.categoryId?.name ?? (isGoal ? 'Quỹ tích lũy' : 'Toàn bộ ví');
 
-  const message = isGoal
+  return isGoal
     ? `${scope} (${walletName}) đã đạt ${notification.thresholdPercent}% mục tiêu`
     : `${scope} (${walletName}) đã ${isOver ? 'vượt' : 'đạt'} ${notification.thresholdPercent}% ngân sách`;
+}
 
+export function NotificationItem({ notification }: { notification: AppNotification }) {
+  const [markRead] = useMarkNotificationReadMutation();
+  const budget = notification.budgetId;
+  const isGoal = budget?.type === 'income';
+  const isOver = notification.thresholdPercent >= 100;
+  const message = buildNotificationMessage(notification);
   const amountLabel = isGoal ? 'Đã tích lũy' : 'Đã chi';
 
   return (
@@ -68,8 +81,44 @@ export function NotificationItem({ notification }: { notification: AppNotificati
 }
 
 export function NotificationBell() {
-  const { data: notifications } = useGetNotificationsQuery();
+  const { data: notifications } = useGetNotificationsQuery(undefined, {
+    pollingInterval: NOTIFICATION_POLL_INTERVAL,
+  });
   const unreadCount = (notifications ?? []).filter((n) => !n.isRead).length;
+
+  // Lần mount đầu chỉ ghi nhận danh sách hiện có để không pip/toast loạt thông
+  // báo cũ; từ sau đó, bất kỳ thông báo mới nào xuất hiện (từ polling/focus/
+  // mutation) đều phát tiếng pip + toast để gây sự chú ý.
+  const knownIdsRef = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (!notifications) return;
+    const ids = new Set(notifications.map((n) => n.documentId));
+
+    if (knownIdsRef.current) {
+      const newOnes = notifications.filter((n) => !knownIdsRef.current!.has(n.documentId));
+      if (newOnes.length > 0) {
+        playNotificationSound();
+        // Có thể nhận nhiều thông báo cùng lúc (vd chạm 80% rồi vượt 100%) -
+        // hiện toast từng cái, ngưỡng thấp hiện trước.
+        newOnes
+          .slice()
+          .sort((a, b) => a.thresholdPercent - b.thresholdPercent)
+          .forEach((n) => {
+            const description = `${
+              n.budgetId?.type === 'income' ? 'Đã tích lũy' : 'Đã chi'
+            } ${formatCurrency(n.amountSpentAtTrigger)}`;
+            if (n.thresholdPercent >= 100) {
+              toast.error(buildNotificationMessage(n), { description });
+            } else {
+              toast.warning(buildNotificationMessage(n), { description });
+            }
+          });
+      }
+    }
+
+    knownIdsRef.current = ids;
+  }, [notifications]);
 
   return (
     <DropdownMenu>
