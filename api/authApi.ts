@@ -58,19 +58,20 @@ export const authApi = baseApi.injectEndpoints({
       },
     }),
 
-    resendMail: builder.mutation<ApiMessage, { invalidtoken: string }>({
-      query: ({ invalidtoken }) => ({
+    resendMail: builder.mutation<ApiMessage, { email: string }>({
+      query: ({ email }) => ({
         url: '/auth/resend-mail',
         method: 'POST',
-        headers: { invalidtoken },
+        body: { email },
       }),
     }),
 
-    verifyEmail: builder.mutation<ApiMessage, { verifytoken: string }>({
-      query: ({ verifytoken }) => ({
+    verifyEmail: builder.mutation<ApiMessage, { verifytoken: string; email: string }>({
+      query: ({ verifytoken, email }) => ({
         url: '/auth/verify-email',
         method: 'POST',
         headers: { verifytoken },
+        body: { email },
       }),
     }),
 

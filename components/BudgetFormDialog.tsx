@@ -24,11 +24,10 @@ import {
 import { useGetCategoriesQuery } from '@/api/categoryApi';
 import { useCreateBudgetMutation, useUpdateBudgetMutation } from '@/api/budgetApi';
 import { useGetWalletsQuery } from '@/api/walletApi';
+import { EmptySelectItem } from '@/components/EmptySelectItem';
 import { SingleSelectToggle } from '@/components/SingleSelectToggle';
 import { getErrorMessage } from '@/lib/errors';
 import type { Budget, BudgetType } from '@/types/api';
-
-const NO_CATEGORY = '__none__';
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR - 1 + i);
@@ -48,7 +47,7 @@ interface BudgetFormDialogProps {
 export function BudgetFormDialog({ open, onOpenChange, budget, onSuccess }: BudgetFormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col">
         {open && (
           <BudgetFormBody
             key={budget?.documentId ?? 'create'}
@@ -79,24 +78,47 @@ function BudgetFormBody({
   const isSubmitting = isCreating || isUpdating;
 
   const [name, setName] = useState(budget?.name ?? '');
+
+  // Khi sửa: tìm danh mục cha từ cây danh mục (budget.categoryId không populate
+  // parent, nhưng query categories thì có).
+  const existingCategory = budget?.categoryId
+    ? (categories ?? []).find((c) => c.documentId === budget.categoryId?.documentId)
+    : undefined;
+  const existingParentId = existingCategory?.parent?.documentId ?? '';
+
   const [type, setType] = useState<BudgetType>(budget?.type ?? 'expense');
   const [walletId, setWalletId] = useState(budget?.walletId?.documentId ?? '');
-  const [categoryId, setCategoryId] = useState(budget?.categoryId?.documentId ?? NO_CATEGORY);
+  const [categoryScope, setCategoryScope] = useState<'all' | 'category'>(budget?.categoryId ? 'category' : 'all');
+  const [parentCategoryId, setParentCategoryId] = useState(existingParentId);
+  const [categoryId, setCategoryId] = useState(budget?.categoryId?.documentId ?? '');
   const [amountLimit, setAmountLimit] = useState(budget ? String(budget.amountLimit) : '');
   const [periodMonth, setPeriodMonth] = useState(String(budget?.periodMonth ?? new Date().getMonth() + 1));
   const [periodYear, setPeriodYear] = useState(String(budget?.periodYear ?? CURRENT_YEAR));
   const [error, setError] = useState<string | null>(null);
 
-  // Danh mục cha chỉ để gom nhóm quản lý, giao dịch không bao giờ gán vào đó
-  // -> ngân sách theo category cũng chỉ chọn được danh mục con. Ngân sách chỉ
-  // theo dõi chi tiêu nên cũng lọc bớt danh mục thu nhập.
-  const assignableCategories = (categories ?? []).filter((c) => c.parent && c.type === 'expense');
+  // Ngân sách chỉ theo dõi chi tiêu nên lọc bớt danh mục thu nhập; chỉ chọn
+  // được danh mục con (cha chỉ để gom nhóm quản lý, giao dịch không gán vào đó).
+  const expenseParents = (categories ?? []).filter(
+    (c) => !c.parent && c.type === 'expense' && c.children.length > 0,
+  );
+  const expenseChildren = parentCategoryId
+    ? (categories ?? []).filter((c) => c.parent?.documentId === parentCategoryId)
+    : [];
 
   const onTypeChange = (value: BudgetType) => {
     setType(value);
     // Quỹ tích lũy chỉ áp dụng toàn ví, không theo category/tháng - reset lại
     // lựa chọn danh mục cho khỏi gây hiểu nhầm.
-    if (value === 'income') setCategoryId(NO_CATEGORY);
+    if (value === 'income') {
+      setCategoryScope('all');
+      setParentCategoryId('');
+      setCategoryId('');
+    }
+  };
+
+  const onParentCategoryChange = (value: string) => {
+    setParentCategoryId(value);
+    setCategoryId('');
   };
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -114,11 +136,16 @@ function BudgetFormBody({
       return;
     }
 
+    if (type === 'expense' && categoryScope === 'category' && !categoryId) {
+      setError('Vui lòng chọn danh mục con.');
+      return;
+    }
+
     const body = {
       name: name.trim() ? name.trim() : undefined,
       type,
       walletId,
-      categoryId: type === 'income' || categoryId === NO_CATEGORY ? null : categoryId,
+      categoryId: type === 'income' || categoryScope === 'all' ? null : categoryId,
       amountLimit: parsedAmount,
       periodMonth: type === 'income' ? null : Number(periodMonth),
       periodYear: type === 'income' ? null : Number(periodYear),
@@ -142,7 +169,7 @@ function BudgetFormBody({
   };
 
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} className="flex min-h-0 flex-col gap-6">
       <DialogHeader>
         <DialogTitle>{isEdit ? 'Chỉnh Sửa Ngân Sách' : 'Tạo Ngân Sách Mới'}</DialogTitle>
         <DialogDescription>
@@ -152,12 +179,14 @@ function BudgetFormBody({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="grid gap-4 py-4">
-        <div className="space-y-1.5">
-          <Label>Loại ngân sách</Label>
-          <SingleSelectToggle options={BUDGET_TYPE_OPTIONS} value={type} onChange={onTypeChange} />
-        </div>
+      {/* Header cố định đến hết Loại ngân sách */}
+      <div className="space-y-1.5">
+        <Label>Loại ngân sách</Label>
+        <SingleSelectToggle options={BUDGET_TYPE_OPTIONS} value={type} onChange={onTypeChange} />
+      </div>
 
+      {/* Phần giữa scroll được, từ Tên ngân sách đến khung cảnh báo */}
+      <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto pr-1">
         <div className="space-y-1.5">
           <Label htmlFor="budget-name">Tên ngân sách (tùy chọn)</Label>
           <Input
@@ -189,32 +218,72 @@ function BudgetFormBody({
         </div>
 
         {type === 'expense' && (
-          <div className="space-y-1.5">
-            <Label>Áp dụng cho danh mục chi tiêu *</Label>
-            <Select
-              value={categoryId}
-              onValueChange={(v) => setCategoryId(v ?? NO_CATEGORY)}
-              items={[
-                { value: NO_CATEGORY, label: 'Toàn bộ ví' },
-                ...assignableCategories.map((c) => ({
-                  value: c.documentId,
-                  label: c.parent ? `${c.parent.name} / ${c.name}` : c.name,
-                })),
-              ]}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Toàn bộ ví" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_CATEGORY}>Toàn bộ ví</SelectItem>
-                {assignableCategories.map((c) => (
-                  <SelectItem key={c.documentId} value={c.documentId}>
-                    {c.parent ? `${c.parent.name} / ${c.name}` : c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <>
+            <div className="space-y-1.5">
+              <Label>Phạm vi áp dụng</Label>
+              <SingleSelectToggle
+                options={[
+                  { value: 'all', label: 'Toàn bộ ví' },
+                  { value: 'category', label: 'Theo danh mục cụ thể' },
+                ]}
+                value={categoryScope}
+                onChange={setCategoryScope}
+              />
+            </div>
+
+            {categoryScope === 'category' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Danh mục cha (Cấp 1) *</Label>
+                  <Select
+                    value={parentCategoryId}
+                    onValueChange={(v) => onParentCategoryChange(v ?? '')}
+                    items={expenseParents.map((c) => ({ value: c.documentId, label: c.name }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Chọn danh mục cha" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {expenseParents.length === 0 ? (
+                        <EmptySelectItem />
+                      ) : (
+                        expenseParents.map((c) => (
+                          <SelectItem key={c.documentId} value={c.documentId}>
+                            {c.name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Danh mục con (Cấp 2) *</Label>
+                  <Select
+                    value={categoryId}
+                    onValueChange={(v) => setCategoryId(v ?? '')}
+                    items={expenseChildren.map((c) => ({ value: c.documentId, label: c.name }))}
+                    disabled={!parentCategoryId}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Chọn danh mục con" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {expenseChildren.length === 0 ? (
+                        <EmptySelectItem />
+                      ) : (
+                        expenseChildren.map((c) => (
+                          <SelectItem key={c.documentId} value={c.documentId}>
+                            {c.name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+          </>
         )}
 
         <div className="space-y-1.5">

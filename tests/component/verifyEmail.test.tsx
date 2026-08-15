@@ -45,13 +45,24 @@ describe('VerifyEmailPage', () => {
     expect(screen.queryByRole('button', { name: /gửi lại email xác thực/i })).not.toBeInTheDocument();
   });
 
-  it('verifies automatically on mount when a token is present, and shows success', async () => {
+  it('does not show the resend button when the link has a token but no email', () => {
     searchParams = new URLSearchParams({ token: 'abc123' });
+    verifyEmail.mockReturnValue(rejectWith('Mã không hợp lệ!', 'INVALID_TOKEN'));
+
+    render(<VerifyEmailPage />);
+
+    expect(screen.queryByRole('button', { name: /gửi lại email xác thực/i })).not.toBeInTheDocument();
+  });
+
+  it('verifies automatically on mount when a token is present, and shows success', async () => {
+    searchParams = new URLSearchParams({ token: 'abc123', email: 'user@test.com' });
     verifyEmail.mockReturnValue({ unwrap: () => Promise.resolve({ message: 'Xác thực thành công!' }) });
 
     render(<VerifyEmailPage />);
 
-    await waitFor(() => expect(verifyEmail).toHaveBeenCalledWith({ verifytoken: 'abc123' }));
+    await waitFor(() =>
+      expect(verifyEmail).toHaveBeenCalledWith({ verifytoken: 'abc123', email: 'user@test.com' }),
+    );
     expect(await screen.findByText('Xác thực thành công!')).toBeInTheDocument();
     expect(screen.getByText(/tự động chuyển về trang đăng nhập/i)).toBeInTheDocument();
   });
@@ -61,7 +72,7 @@ describe('VerifyEmailPage', () => {
     afterEach(() => jest.useRealTimers());
 
     it('redirects to login 3s after a successful verification', async () => {
-      searchParams = new URLSearchParams({ token: 'abc123' });
+      searchParams = new URLSearchParams({ token: 'abc123', email: 'user@test.com' });
       verifyEmail.mockReturnValue({ unwrap: () => Promise.resolve({ message: 'Xác thực thành công!' }) });
 
       render(<VerifyEmailPage />);
@@ -77,7 +88,7 @@ describe('VerifyEmailPage', () => {
       ['ACCOUNT_BLOCKED', 'Tài khoản của bạn đã bị khóa.'],
       ['ACCOUNT_DELETED', 'Tài khoản đã bị xóa.'],
     ])('shows %s and redirects to login after 3s without offering a resend', async (code, message) => {
-      searchParams = new URLSearchParams({ token: 'abc123' });
+      searchParams = new URLSearchParams({ token: 'abc123', email: 'user@test.com' });
       verifyEmail.mockReturnValue(rejectWith(message, code));
 
       render(<VerifyEmailPage />);
@@ -91,7 +102,7 @@ describe('VerifyEmailPage', () => {
     });
 
     it('keeps the resend button disabled for 3s on an invalid token, then enables it', async () => {
-      searchParams = new URLSearchParams({ token: 'expired-token' });
+      searchParams = new URLSearchParams({ token: 'expired-token', email: 'user@test.com' });
       verifyEmail.mockReturnValue(rejectWith('Mã không hợp lệ!', 'INVALID_TOKEN'));
 
       render(<VerifyEmailPage />);
@@ -107,8 +118,8 @@ describe('VerifyEmailPage', () => {
     });
   });
 
-  it('resend button calls resendMail with the invalidtoken header payload', async () => {
-    searchParams = new URLSearchParams({ token: 'expired-token' });
+  it('resend button calls resendMail with the email from the link', async () => {
+    searchParams = new URLSearchParams({ token: 'expired-token', email: 'user@test.com' });
     verifyEmail.mockReturnValue(rejectWith('Mã không hợp lệ!', 'INVALID_TOKEN'));
     resendMail.mockReturnValue({ unwrap: () => Promise.resolve({ message: 'Đã gửi lại email.' }) });
 
@@ -123,7 +134,7 @@ describe('VerifyEmailPage', () => {
 
     await user.click(screen.getByRole('button', { name: /gửi lại email xác thực/i }));
 
-    await waitFor(() => expect(resendMail).toHaveBeenCalledWith({ invalidtoken: 'expired-token' }));
+    await waitFor(() => expect(resendMail).toHaveBeenCalledWith({ email: 'user@test.com' }));
     expect(await screen.findByText('Đã gửi lại email.')).toBeInTheDocument();
   });
 });

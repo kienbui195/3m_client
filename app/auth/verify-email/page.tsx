@@ -60,7 +60,10 @@ export default function VerifyEmailPage() {
 function VerifyEmailCard() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Link verify có sẵn cả token lẫn email đăng ký (xem send-mail.ts ở BE) -
+  // email cần thiết để bấm gửi lại mail khi token sai/hết hạn.
   const token = searchParams.get('token');
+  const email = searchParams.get('email');
 
   const [verifyEmail] = useVerifyEmailMutation();
   const [resendMail, { isLoading: isResending }] = useResendMailMutation();
@@ -80,7 +83,7 @@ function VerifyEmailCard() {
     if (!token || verifiedRef.current) return;
     verifiedRef.current = true;
 
-    verifyEmail({ verifytoken: token })
+    verifyEmail({ verifytoken: token, email: email ?? '' })
       .unwrap()
       .then((res) => {
         setStatus('success');
@@ -112,15 +115,15 @@ function VerifyEmailCard() {
   }, [countdown, status, router]);
 
   const onResend = useCallback(async () => {
-    if (!token) return;
+    if (!email) return;
     setResendMessage(null);
     try {
-      const res = await resendMail({ invalidtoken: token }).unwrap();
+      const res = await resendMail({ email }).unwrap();
       setResendMessage(res.message);
     } catch (err) {
       setResendMessage(getErrorMessage(err));
     }
-  }, [resendMail, token]);
+  }, [resendMail, email]);
 
   if (status === 'verifying') {
     return (
@@ -171,9 +174,9 @@ function VerifyEmailCard() {
           </>
         ) : (
           <div className="flex w-full flex-col items-center gap-2">
-            {/* Không có token thì không gửi lại được (API cần token cũ để tìm
-                user), chỉ còn đường quay về login. */}
-            {token ? (
+            {/* Không có email thì không gửi lại được (BE tìm user theo email
+                từ link verify), chỉ còn đường quay về login. */}
+            {email ? (
               <Button
                 variant="outline"
                 onClick={onResend}
